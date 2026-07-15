@@ -1,12 +1,20 @@
 const { Client, GatewayIntentBits, EmbedBuilder, SlashCommandBuilder, REST, Routes } = require('discord.js');
 const mongoose = require('mongoose');
+const express = require('express');
 require('dotenv').config();
 
+// 1. EXPRESS KEEP-ALIVE FOR RENDER FREE
+const app = express();
+const PORT = process.env.PORT || 3000;
+app.get('/', (req, res) => res.send('Zyro Bot is running!'));
+app.listen(PORT, () => console.log(`✅ Web server on port ${PORT}`));
+
+// 2. DISCORD BOT SETUP
 const client = new Client({
   intents: [GatewayIntentBits.Guilds]
 });
 
-// MongoDB Schema
+// 3. MONGODB SCHEMA
 const UserSchema = new mongoose.Schema({
   userId: String,
   balance: { type: Number, default: 1000 },
@@ -14,30 +22,30 @@ const UserSchema = new mongoose.Schema({
 });
 const User = mongoose.model('User', UserSchema);
 
-// Connect to Mongo
+// 4. CONNECT TO MONGO
 mongoose.connect(process.env.MONGO_URI)
 .then(() => console.log('✅ MongoDB Connected'))
 .catch(err => console.log(err));
 
-// 1. DEFINE SLASH COMMANDS
+// 5. DEFINE SLASH COMMANDS
 const commands = [
   new SlashCommandBuilder()
-   .setName('spin')
-   .setDescription('Spin for coins! Costs 100 coins'),
+  .setName('spin')
+  .setDescription('Spin for coins! Costs 100 coins'),
   new SlashCommandBuilder()
-   .setName('balance')
-   .setDescription('Check your coin balance')
+  .setName('balance')
+  .setDescription('Check your coin balance')
 ].map(command => command.toJSON());
 
-// 2. AUTO SYNC GLOBAL COMMANDS ON START
+// 6. AUTO SYNC GLOBAL COMMANDS ON START
 client.once('ready', async () => {
-  console.log(`Logged in as ${client.user.tag}`);
+  console.log(`✅ Logged in as ${client.user.tag}`);
 
   const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
   try {
     console.log('🔄 Syncing global slash commands...');
     await rest.put(
-      Routes.applicationCommands(client.user.id), // No CLIENT_ID needed!
+      Routes.applicationCommands(client.user.id),
       { body: commands },
     );
     console.log('✅ Successfully synced global slash commands');
@@ -46,7 +54,7 @@ client.once('ready', async () => {
   }
 });
 
-// 3. HANDLE SLASH COMMANDS
+// 7. HANDLE SLASH COMMANDS
 client.on('interactionCreate', async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
@@ -59,7 +67,7 @@ client.on('interactionCreate', async interaction => {
   }
 
   if (commandName === 'spin') {
-    await interaction.deferReply(); // spinning takes time
+    await interaction.deferReply();
     let user = await User.findOne({ userId: interaction.user.id });
     if (!user) user = await User.create({ userId: interaction.user.id });
 
@@ -80,9 +88,9 @@ client.on('interactionCreate', async interaction => {
     await user.save();
 
     const embed = new EmbedBuilder()
-    .setTitle(win? '🎉 YOU WON!' : '😢 YOU LOST')
-    .setDescription(`Bet: **${bet}** coins\nPrize: **${prize}** coins\nBalance: **${user.balance}** coins`)
-    .setColor(win? 'Green' : 'Red');
+   .setTitle(win? '🎉 YOU WON!' : '😢 YOU LOST')
+   .setDescription(`Bet: **${bet}** coins\nPrize: **${prize}** coins\nBalance: **${user.balance}** coins`)
+   .setColor(win? 'Green' : 'Red');
 
     await interaction.editReply({ embeds: [embed] });
   }
