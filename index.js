@@ -1,13 +1,9 @@
-const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, SlashCommandBuilder, REST, Routes } = require('discord.js');
 const mongoose = require('mongoose');
 require('dotenv').config();
 
-const client = new Client({ 
-  intents: [
-    GatewayIntentBits.Guilds, 
-    GatewayIntentBits.GuildMessages, 
-    GatewayIntentBits.MessageContent
-  ] 
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds]
 });
 
 // MongoDB Schema
@@ -20,28 +16,61 @@ const User = mongoose.model('User', UserSchema);
 
 // Connect to Mongo
 mongoose.connect(process.env.MONGO_URI)
- .then(() => console.log('✅ MongoDB Connected'))
- .catch(err => console.log(err));
+.then(() => console.log('✅ MongoDB Connected'))
+.catch(err => console.log(err));
 
-client.on('ready', () => {
+// 1. DEFINE SLASH COMMANDS
+const commands = [
+  new SlashCommandBuilder()
+   .setName('spin')
+   .setDescription('Spin for coins! Costs 100 coins'),
+  new SlashCommandBuilder()
+   .setName('balance')
+   .setDescription('Check your coin balance')
+].map(command => command.toJSON());
+
+// 2. AUTO SYNC GLOBAL COMMANDS ON START
+client.once('ready', async () => {
   console.log(`Logged in as ${client.user.tag}`);
+
+  const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
+  try {
+    console.log('🔄 Syncing global slash commands...');
+    await rest.put(
+      Routes.applicationCommands(client.user.id), // No CLIENT_ID needed!
+      { body: commands },
+    );
+    console.log('✅ Successfully synced global slash commands');
+  } catch (error) {
+    console.error(error);
+  }
 });
 
-client.on('messageCreate', async (message) => {
-  if (message.author.bot) return;
+// 3. HANDLE SLASH COMMANDS
+client.on('interactionCreate', async interaction => {
+  if (!interaction.isChatInputCommand()) return;
 
-  //!spin command
-  if (message.content === '!spin') {
-    let user = await User.findOne({ userId: message.author.id });
-    if (!user) user = await User.create({ userId: message.author.id });
+  const { commandName } = interaction;
+
+  if (commandName === 'balance') {
+    let user = await User.findOne({ userId: interaction.user.id });
+    if (!user) user = await User.create({ userId: interaction.user.id });
+    await interaction.reply(`💰 Your balance: **${user.balance}** coins`);
+  }
+
+  if (commandName === 'spin') {
+    await interaction.deferReply(); // spinning takes time
+    let user = await User.findOne({ userId: interaction.user.id });
+    if (!user) user = await User.create({ userId: interaction.user.id });
 
     // Cooldown 10 seconds
     if (user.lastSpin && (Date.now() - user.lastSpin) < 10000) {
-      return message.reply('⏳ Wait 10 seconds before spinning again!');
+      const wait = Math.ceil((10000 - (Date.now() - user.lastSpin)) / 1000);
+      return interaction.editReply(`⏳ Wait ${wait} seconds before spinning again!`);
     }
 
     const bet = 100;
-    if (user.balance < bet) return message.reply('💸 Not enough coins!');
+    if (user.balance < bet) return interaction.editReply('💸 Not enough coins!');
 
     user.balance -= bet;
     const win = Math.random() < 0.4; // 40% win chance
@@ -51,18 +80,11 @@ client.on('messageCreate', async (message) => {
     await user.save();
 
     const embed = new EmbedBuilder()
-     .setTitle(win? '🎉 YOU WON!' : '😢 YOU LOST')
-     .setDescription(`Bet: ${bet} coins\nPrize: ${prize} coins\nBalance: ${user.balance} coins`)
-     .setColor(win? 'Green' : 'Red');
-    
-    message.reply({ embeds: [embed] });
-  }
+    .setTitle(win? '🎉 YOU WON!' : '😢 YOU LOST')
+    .setDescription(`Bet: **${bet}** coins\nPrize: **${prize}** coins\nBalance: **${user.balance}** coins`)
+    .setColor(win? 'Green' : 'Red');
 
-  //!balance command
-  if (message.content === '!balance') {
-    let user = await User.findOne({ userId: message.author.id });
-    if (!user) user = await User.create({ userId: message.author.id });
-    message.reply(`💰 Your balance: ${user.balance} coins`);
+    await interaction.editReply({ embeds: [embed] });
   }
 });
 
