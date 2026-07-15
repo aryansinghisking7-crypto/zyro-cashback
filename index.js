@@ -1,98 +1,120 @@
-const { Client, GatewayIntentBits, EmbedBuilder, SlashCommandBuilder, REST, Routes } = require('discord.js');
+const { Client, GatewayIntentBits, SlashCommandBuilder, PermissionFlagsBits, REST, Routes } = require('discord.js');
 const mongoose = require('mongoose');
-const express = require('express');
 require('dotenv').config();
 
-// 1. EXPRESS KEEP-ALIVE FOR RENDER FREE
-const app = express();
-const PORT = process.env.PORT || 3000;
-app.get('/', (req, res) => res.send('Zyro Bot is running!'));
-app.listen(PORT, () => console.log(`✅ Web server on port ${PORT}`));
+const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
-// 2. DISCORD BOT SETUP
-const client = new Client({
-  intents: [GatewayIntentBits.Guilds]
-});
-
-// 3. MONGODB SCHEMA
-const UserSchema = new mongoose.Schema({
+// ===== DATABASE =====
+mongoose.connect(process.env.MONGO_URI);
+const userSchema = new mongoose.Schema({
   userId: String,
-  balance: { type: Number, default: 1000 },
-  lastSpin: { type: Date, default: null }
+  balance: { type: Number, default: 0 },
+  spins: { type: Number, default: 0 }
 });
-const User = mongoose.model('User', UserSchema);
+const User = mongoose.model('User', userSchema);
 
-// 4. CONNECT TO MONGO
-mongoose.connect(process.env.MONGO_URI)
-.then(() => console.log('✅ MongoDB Connected'))
-.catch(err => console.log(err));
-
-// 5. DEFINE SLASH COMMANDS
+// ===== COMMANDS =====
 const commands = [
-  new SlashCommandBuilder()
-  .setName('spin')
-  .setDescription('Spin for coins! Costs 100 coins'),
-  new SlashCommandBuilder()
-  .setName('balance')
-  .setDescription('Check your coin balance')
-].map(command => command.toJSON());
+  new SlashCommandBuilder().setName('spin').setDescription('Use 1 spin slot to spin for cashback'),
+  new SlashCommandBuilder().setName('wallet').setDescription('Check cashback and spins').addUserOption(o => o.setName('user').setDescription('User to check').setRequired(false)),
+  new SlashCommandBuilder().setName('spins').setDescription('Check spin slots').addUserOption(o => o.setName('user').setDescription('User to check').setRequired(false)),
+  new SlashCommandBuilder().setName('leaderboard').setDescription('Top 10 cashback users'),
+  new SlashCommandBuilder().setName('cashback').setDescription('ADMIN: Give 1 spin slot to user').addUserOption(o => o.setName('user').setDescription('User').setRequired(true)).setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+  new SlashCommandBuilder().setName('addcash').setDescription('ADMIN: Add cashback').addUserOption(o => o.setName('user').setRequired(true)).addIntegerOption(o => o.setName('amount').setRequired(true)).setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+  new SlashCommandBuilder().setName('removecash').setDescription('ADMIN: Remove cashback').addUserOption(o => o.setName('user').setRequired(true)).addIntegerOption(o => o.setName('amount').setRequired(true)).setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+  new SlashCommandBuilder().setName('resetuser').setDescription('ADMIN: Reset user').addUserOption(o => o.setName('user').setRequired(true)).setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+  new SlashCommandBuilder().setName('setcooldown').setDescription('ADMIN: Set spin cooldown').addIntegerOption(o => o.setName('minutes').setRequired(true)).setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+].map(cmd => cmd.toJSON());
 
-// 6. AUTO SYNC GLOBAL COMMANDS ON START
+// ===== REGISTER GUILD COMMANDS - NO CLIENT_ID NEEDED =====
 client.once('ready', async () => {
-  console.log(`✅ Logged in as ${client.user.tag}`);
-
+  console.log(`Logged in as ${client.user.tag}`);
+  
+  const guilds = client.guilds.cache.map(g => g.id);
   const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
-  try {
-    console.log('🔄 Syncing global slash commands...');
-    await rest.put(
-      Routes.applicationCommands(client.user.id),
-      { body: commands },
-    );
-    console.log('✅ Successfully synced global slash commands');
-  } catch (error) {
-    console.error(error);
+  
+  for (const guildId of guilds) {
+    try {
+      await rest.put(Routes.applicationGuildCommands(client.user.id, guildId), { body: commands });
+      console.log(`Commands registered for guild ${guildId}`);
+    } catch (err) { console.error(err); }
   }
 });
 
-// 7. HANDLE SLASH COMMANDS
-client.on('interactionCreate', async interaction => {
-  if (!interaction.isChatInputCommand()) return;
+// ===== BOT LOGIC =====
+let cooldown = 5; // default 5 minutes
 
+client.on('interactionCreate', async interaction => {
+  if (!interaction.isCommand()) return;
   const { commandName } = interaction;
 
-  if (commandName === 'balance') {
-    let user = await User.findOne({ userId: interaction.user.id });
-    if (!user) user = await User.create({ userId: interaction.user.id });
-    await interaction.reply(`💰 Your balance: **${user.balance}** coins`);
+  // /spin
+  if (commandName === 'spin') {
+    let userData = await User.findOne({ userId: interaction.user.id });
+    if (!userData || userData.spins < 1) return interaction.reply('❌ You have 0 spin slots. Ask admin for `/cashback`');
+    userData.spins -= 1;
+    const win = Math.floor(Math.random() * 100) + 10; 
+    userData.balance += win;
+    await userData.save();
+    return interaction.reply(`🎰 You spun and won **₹${win}**!\n💰 New Balance: ₹${userData.balance}\n🎰 Spins left: ${userData.spins}`);
   }
 
-  if (commandName === 'spin') {
-    await interaction.deferReply();
-    let user = await User.findOne({ userId: interaction.user.id });
-    if (!user) user = await User.create({ userId: interaction.user.id });
+  // /wallet
+  if (commandName === 'wallet') {
+    const user = interaction.options.getUser('user') || interaction.user;
+    let data = await User.findOne({ userId: user.id }) || { balance: 0, spins: 0 };
+    return interaction.reply(`👛 **${user.username}'s Wallet**\n💰 Cashback: ₹${data.balance}\n🎰 Spin Slots: ${data.spins}`);
+  }
 
-    // Cooldown 10 seconds
-    if (user.lastSpin && (Date.now() - user.lastSpin) < 10000) {
-      const wait = Math.ceil((10000 - (Date.now() - user.lastSpin)) / 1000);
-      return interaction.editReply(`⏳ Wait ${wait} seconds before spinning again!`);
-    }
+  // /spins
+  if (commandName === 'spins') {
+    const user = interaction.options.getUser('user') || interaction.user;
+    let data = await User.findOne({ userId: user.id }) || { spins: 0 };
+    return interaction.reply(`🎰 **${user.username}** has **${data.spins}** spin slot(s)`);
+  }
 
-    const bet = 100;
-    if (user.balance < bet) return interaction.editReply('💸 Not enough coins!');
+  // /leaderboard
+  if (commandName === 'leaderboard') {
+    const top = await User.find().sort({ balance: -1 }).limit(10);
+    let msg = '🏆 **Leaderboard**\n';
+    top.forEach((u, i) => msg += `${i+1}. <@${u.userId}> - ₹${u.balance}\n`);
+    return interaction.reply(msg || 'No data yet');
+  }
 
-    user.balance -= bet;
-    const win = Math.random() < 0.4; // 40% win chance
-    const prize = win? bet * 2 : 0;
-    user.balance += prize;
-    user.lastSpin = new Date();
-    await user.save();
+  // /cashback - ADMIN
+  if (commandName === 'cashback') {
+    const user = interaction.options.getUser('user');
+    let data = await User.findOneAndUpdate({ userId: user.id }, { $inc: { spins: 1 } }, { upsert: true, new: true });
+    return interaction.reply(`✅ Gave 1 spin to **${user.username}**. Total: ${data.spins}`);
+  }
 
-    const embed = new EmbedBuilder()
-   .setTitle(win? '🎉 YOU WON!' : '😢 YOU LOST')
-   .setDescription(`Bet: **${bet}** coins\nPrize: **${prize}** coins\nBalance: **${user.balance}** coins`)
-   .setColor(win? 'Green' : 'Red');
+  // /addcash - ADMIN
+  if (commandName === 'addcash') {
+    const user = interaction.options.getUser('user');
+    const amount = interaction.options.getInteger('amount');
+    let data = await User.findOneAndUpdate({ userId: user.id }, { $inc: { balance: amount } }, { upsert: true, new: true });
+    return interaction.reply(`✅ Added ₹${amount} to **${user.username}**. New balance: ₹${data.balance}`);
+  }
 
-    await interaction.editReply({ embeds: [embed] });
+  // /removecash - ADMIN
+  if (commandName === 'removecash') {
+    const user = interaction.options.getUser('user');
+    const amount = interaction.options.getInteger('amount');
+    let data = await User.findOneAndUpdate({ userId: user.id }, { $inc: { balance: -amount } }, { new: true });
+    return interaction.reply(`✅ Removed ₹${amount} from **${user.username}**. New balance: ₹${data.balance}`);
+  }
+
+  // /resetuser - ADMIN
+  if (commandName === 'resetuser') {
+    const user = interaction.options.getUser('user');
+    await User.findOneAndUpdate({ userId: user.id }, { balance: 0, spins: 0 });
+    return interaction.reply(`✅ Reset **${user.username}**`);
+  }
+
+  // /setcooldown - ADMIN
+  if (commandName === 'setcooldown') {
+    cooldown = interaction.options.getInteger('minutes');
+    return interaction.reply(`✅ Cooldown set to ${cooldown} minutes`);
   }
 });
 
