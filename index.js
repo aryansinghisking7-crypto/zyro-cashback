@@ -16,17 +16,40 @@ const User = mongoose.model('User', userSchema);
 // ===== COMMANDS =====
 const commands = [
   new SlashCommandBuilder().setName('spin').setDescription('Use 1 spin slot to spin for cashback'),
-  new SlashCommandBuilder().setName('wallet').setDescription('Check cashback and spins').addUserOption(o => o.setName('user').setDescription('User to check').setRequired(false)),
-  new SlashCommandBuilder().setName('spins').setDescription('Check spin slots').addUserOption(o => o.setName('user').setDescription('User to check').setRequired(false)),
+  
+  new SlashCommandBuilder().setName('wallet').setDescription('Check cashback and spins')
+    .addUserOption(o => o.setName('user').setDescription('User to check. Leave empty for yourself').setRequired(false)),
+    
+  new SlashCommandBuilder().setName('spins').setDescription('Check spin slots')
+    .addUserOption(o => o.setName('user').setDescription('User to check. Leave empty for yourself').setRequired(false)),
+    
   new SlashCommandBuilder().setName('leaderboard').setDescription('Top 10 cashback users'),
-  new SlashCommandBuilder().setName('cashback').setDescription('ADMIN: Give 1 spin slot to user').addUserOption(o => o.setName('user').setDescription('User').setRequired(true)).setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
-  new SlashCommandBuilder().setName('addcash').setDescription('ADMIN: Add cashback').addUserOption(o => o.setName('user').setRequired(true)).addIntegerOption(o => o.setName('amount').setRequired(true)).setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
-  new SlashCommandBuilder().setName('removecash').setDescription('ADMIN: Remove cashback').addUserOption(o => o.setName('user').setRequired(true)).addIntegerOption(o => o.setName('amount').setRequired(true)).setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
-  new SlashCommandBuilder().setName('resetuser').setDescription('ADMIN: Reset user').addUserOption(o => o.setName('user').setRequired(true)).setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
-  new SlashCommandBuilder().setName('setcooldown').setDescription('ADMIN: Set spin cooldown').addIntegerOption(o => o.setName('minutes').setRequired(true)).setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+  
+  new SlashCommandBuilder().setName('cashback').setDescription('ADMIN: Give 1 spin slot to user')
+    .addUserOption(o => o.setName('user').setDescription('User to give spin to').setRequired(true))
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+    
+  new SlashCommandBuilder().setName('addcash').setDescription('ADMIN: Add cashback to user')
+    .addUserOption(o => o.setName('user').setDescription('User to add cash to').setRequired(true))
+    .addIntegerOption(o => o.setName('amount').setDescription('Amount to add').setRequired(true))
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+    
+  new SlashCommandBuilder().setName('removecash').setDescription('ADMIN: Remove cashback from user')
+    .addUserOption(o => o.setName('user').setDescription('User to remove cash from').setRequired(true))
+    .addIntegerOption(o => o.setName('amount').setDescription('Amount to remove').setRequired(true))
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+    
+  new SlashCommandBuilder().setName('resetuser').setDescription('ADMIN: Reset user balance and spins')
+    .addUserOption(o => o.setName('user').setDescription('User to reset').setRequired(true))
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+    
+  new SlashCommandBuilder().setName('setcooldown').setDescription('ADMIN: Set spin cooldown')
+    .addIntegerOption(o => o.setName('minutes').setDescription('Cooldown in minutes').setRequired(true))
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+    
 ].map(cmd => cmd.toJSON());
 
-// ===== REGISTER GUILD COMMANDS - NO CLIENT_ID NEEDED =====
+// ===== REGISTER GUILD COMMANDS =====
 client.once('ready', async () => {
   console.log(`Logged in as ${client.user.tag}`);
   
@@ -42,7 +65,7 @@ client.once('ready', async () => {
 });
 
 // ===== BOT LOGIC =====
-let cooldown = 5; // default 5 minutes
+let cooldown = 5;
 
 client.on('interactionCreate', async interaction => {
   if (!interaction.isCommand()) return;
